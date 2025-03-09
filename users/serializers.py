@@ -3,7 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from .models import CustomUser
 from .models import PlageHoraire, Semaine, JourSemaine, Enseignant
-from .models import Matiere, Groupe, SousGroupe, ChargeHebdomadaire, AffectationEnseignant
+from .models import Matiere, Groupe,  ChargeHebdomadaire, AffectationEnseignant
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
 
@@ -67,13 +67,7 @@ class GroupeSerializer(serializers.ModelSerializer):
         fields = ['id', 'nom', 'semestre', 'matieres']
 
 
-class SousGroupeSerializer(serializers.ModelSerializer):
-    groupe_parent = GroupeSerializer()
-    groupe_enfant = GroupeSerializer()
 
-    class Meta:
-        model = SousGroupe
-        fields = ['id', 'groupe_parent', 'groupe_enfant']
 
 
 class ChargeHebdomadaireSerializer(serializers.ModelSerializer):

@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from users.views import (
     RegisterView, LoginView, UserView, LogoutView, VerifierEmailView,
     PlageHoraireViewSet, SemaineViewSet, JourSemaineViewSet, EnseignantViewSet,
-    MatiereViewSet, GroupeViewSet, SousGroupeViewSet, ChargeHebdomadaireViewSet,
+    MatiereViewSet, GroupeViewSet, ChargeHebdomadaireViewSet,
     AffectationEnseignantViewSet, generer_emploi_du_temps, telecharger_emploi_excel, telecharger_emploi_pdf
 )
 
@@ -16,7 +16,6 @@ router.register(r'jours-semaine', JourSemaineViewSet, basename='jour-semaine')
 router.register(r'enseignants', EnseignantViewSet, basename='enseignant')
 router.register(r'matieres', MatiereViewSet)
 router.register(r'groupes', GroupeViewSet)
-router.register(r'sous_groupes', SousGroupeViewSet)
 router.register(r'charges_hebdomadaires', ChargeHebdomadaireViewSet)
 router.register(r'affectations_enseignants', AffectationEnseignantViewSet)
 
