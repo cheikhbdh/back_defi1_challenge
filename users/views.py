@@ -12,8 +12,8 @@ from django.core.mail import send_mail
 from rest_framework import viewsets
 from .models import PlageHoraire, Semaine, JourSemaine, Enseignant
 from .serializers import PlageHoraireSerializer, SemaineSerializer, JourSemaineSerializer, EnseignantSerializer
-from .models import Matiere, Groupe, SousGroupe, ChargeHebdomadaire, AffectationEnseignant
-from .serializers import MatiereSerializer, GroupeSerializer, SousGroupeSerializer, ChargeHebdomadaireSerializer, AffectationEnseignantSerializer
+from .models import Matiere, Groupe,  ChargeHebdomadaire, AffectationEnseignant
+from .serializers import MatiereSerializer, GroupeSerializer, ChargeHebdomadaireSerializer, AffectationEnseignantSerializer
 from django.http import JsonResponse, HttpResponse
 from ortools.sat.python import cp_model
 import pandas as pd
@@ -84,7 +84,7 @@ class LoginView(APIView):
         }
         token = jwt.encode(payload, 'secret', algorithm='HS256')
 
-        response = Response({'jwt': token})
+        response = Response({'jwt': token,'role':user.role})
         response.set_cookie(key='jwt', value=token, httponly=True, secure=False, samesite='Lax')
         return response
 
@@ -121,17 +121,14 @@ class LogoutView(APIView):
     
 
 
-# Plage Horaire ViewSet
 class PlageHoraireViewSet(viewsets.ModelViewSet):
     queryset = PlageHoraire.objects.all()
     serializer_class = PlageHoraireSerializer
 
-# Semaine ViewSet
 class SemaineViewSet(viewsets.ModelViewSet):
     queryset = Semaine.objects.all()
     serializer_class = SemaineSerializer
 
-# Jour Semaine ViewSet
 class JourSemaineViewSet(viewsets.ModelViewSet):
     queryset = JourSemaine.objects.all()
     serializer_class = JourSemaineSerializer
@@ -151,10 +148,6 @@ class GroupeViewSet(viewsets.ModelViewSet):
     queryset = Groupe.objects.all()
     serializer_class = GroupeSerializer
 
-
-class SousGroupeViewSet(viewsets.ModelViewSet):
-    queryset = SousGroupe.objects.all()
-    serializer_class = SousGroupeSerializer
 
 
 class ChargeHebdomadaireViewSet(viewsets.ModelViewSet):

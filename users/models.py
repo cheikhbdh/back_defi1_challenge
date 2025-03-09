@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.utils.timezone import now
 import datetime
 import json
+from django.db.utils import IntegrityError
 class CustomUser(AbstractUser):
     id_u = models.AutoField(primary_key=True)
     login = models.CharField(max_length=255, unique=True)
@@ -10,12 +11,12 @@ class CustomUser(AbstractUser):
     password = models.CharField(max_length=255)
     username = None
     ROLE_CHOICES = [
-        ('etudiant', 'etudiant'),
+        ('professeur', 'professeur'),
         ('admin', 'admin'),
         ('directeur', 'directeur'),
-        ('comiteur', 'comiteur'),
+      
     ]
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='etudiant')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='professeur')
 
     groups = models.ManyToManyField(Group, related_name="customuser_groups")
     user_permissions = models.ManyToManyField(Permission, related_name="customuser_permissions")
@@ -24,11 +25,10 @@ class CustomUser(AbstractUser):
     REQUIRED_FIELDS = []
 
 
-
 class PlageHoraire(models.Model):
     id_plh = models.AutoField(primary_key=True)
-    heure_debut = models.TimeField()
-    heure_fin = models.TimeField()
+    heure_debut = models.TimeField(unique=True)
+    heure_fin = models.TimeField(unique=True)
 
     def __str__(self):
         return f"{self.heure_debut} - {self.heure_fin}"
@@ -43,7 +43,10 @@ class PlageHoraire(models.Model):
             ("17:00", "18:30"),
         ]
         for debut, fin in plages_fixes:
-            PlageHoraire.objects.get_or_create(heure_debut=debut, heure_fin=fin)
+            try:
+                PlageHoraire.objects.create(heure_debut=debut, heure_fin=fin)
+            except IntegrityError:
+                pass  # Ignore si la plage existe déjà
 
 
 class Semaine(models.Model):
@@ -54,27 +57,40 @@ class Semaine(models.Model):
 
     def save(self, *args, **kwargs):
         today = now().date()
-        self.annee = today.year
-        self.date_debut = today - datetime.timedelta(days=today.weekday())  # Lundi de la semaine actuelle
-        self.date_fin = self.date_debut + datetime.timedelta(days=5)  # Samedi
+
+        # Vérifier s'il existe déjà une semaine en base
+        derniere_semaine = Semaine.objects.order_by('-date_debut').first()
+
+        if derniere_semaine:
+            prochain_lundi = derniere_semaine.date_debut + datetime.timedelta(days=7)
+        else:
+            # Si aucune semaine n'existe, prendre le lundi actuel
+            prochain_lundi = today - datetime.timedelta(days=today.weekday())
+
+        self.annee = prochain_lundi.year
+        self.date_debut = prochain_lundi
+        self.date_fin = prochain_lundi + datetime.timedelta(days=5)  # Samedi
 
         super(Semaine, self).save(*args, **kwargs)
 
-        # Créer les jours de la semaine automatiquement
-        for i in range(6):  # De lundi (0) à samedi (5)
+        # Créer automatiquement les jours de la semaine
+        for i in range(6):  # De lundi à samedi
             JourSemaine.objects.get_or_create(
                 semaine=self, date_jour=self.date_debut + datetime.timedelta(days=i)
             )
 
-# Modèle pour JourSemaine
+    def __str__(self):
+        return f"Semaine {self.date_debut} - {self.date_fin}"
+
+
+# Modèle JourSemaine
 class JourSemaine(models.Model):
     id_jrs = models.AutoField(primary_key=True)
     semaine = models.ForeignKey(Semaine, on_delete=models.CASCADE)
-    date_jour = models.DateField()
+    date_jour = models.DateField(unique=True)  # Empêche la duplication
 
     def __str__(self):
         return f"{self.date_jour} - Semaine {self.semaine.id_s}"
-
 # Modèle pour Enseignant
 class Enseignant(models.Model):
     id_Es = models.AutoField(primary_key=True)
@@ -89,22 +105,27 @@ class Enseignant(models.Model):
 
     def __str__(self):
         return self.nom
+    
+class Filiere(models.Model):
+    nom = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.nom
+
 class Matiere(models.Model):
-    FILIERE_CHOICES = [
-        ('CNM', 'CNM'),
-        ('RSS', 'RSS'),
-        ('DSI', 'DSI'),
-    ]
     nom = models.CharField(max_length=255, unique=True)
     code = models.CharField(max_length=50, unique=True)
     semestre = models.IntegerField()
-    credits = models.FloatField()  # ECTS
-    coefficient = models.FloatField()  # Pondération de la matière
-    filiere = models.CharField(max_length=3, choices=FILIERE_CHOICES)  # Nouvelle colonne filiere
+    credits = models.FloatField()
+    coefficient = models.FloatField()
+    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, related_name="matieres")
 
     def __str__(self):
-        return f"{self.nom} (S{self.semestre}) - {self.get_filiere_display()}"
+        return f"{self.nom} (S{self.semestre}) - {self.filiere.nom}"
 
+
+
+# Modèle Groupe (lié à une Filière)
 class Groupe(models.Model):
     SEMESTRE_CHOICES = [
         ('S1', 'Semestre 1'),
@@ -114,18 +135,13 @@ class Groupe(models.Model):
         ('S5', 'Semestre 5'),
     ]
     nom = models.CharField(max_length=50, unique=True)
-    semestre = models.CharField(max_length=2, choices=SEMESTRE_CHOICES) 
-    matieres = models.ManyToManyField(Matiere)
-
+    semestre = models.CharField(max_length=2, choices=SEMESTRE_CHOICES)
+    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, related_name="groupes")
+    
     def __str__(self):
-        return f"Groupe {self.nom} - {self.semestre}"
+        return f"Groupe {self.nom} - {self.semestre} ({self.filiere.nom})"
 
-class SousGroupe(models.Model):
-    groupe_parent = models.ForeignKey(Groupe, on_delete=models.CASCADE, related_name="sous_groupes")
-    groupe_enfant = models.ForeignKey(Groupe, on_delete=models.CASCADE, related_name="groupe_parent")
 
-    def __str__(self):
-        return f"{self.groupe_enfant.nom} sous-groupe de {self.groupe_parent.nom}"
 
 
 class ChargeHebdomadaire(models.Model):
@@ -146,8 +162,8 @@ class ChargeHebdomadaire(models.Model):
 
 class AffectationEnseignant(models.Model):
     enseignant = models.ForeignKey('Enseignant', on_delete=models.CASCADE)
-    groupe = models.ForeignKey(Groupe, on_delete=models.CASCADE)
     matiere = models.ForeignKey(Matiere, on_delete=models.CASCADE)
+    
     TYPE_ENSEIGNEMENT = [
         ('CM', 'Cours Magistral'),
         ('TD', 'Travaux Dirigés'),
@@ -155,11 +171,22 @@ class AffectationEnseignant(models.Model):
     ]
     type_enseignement = models.CharField(max_length=2, choices=TYPE_ENSEIGNEMENT)
 
+    # CM → Filière, TD/TP → Groupe
+    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, null=True, blank=True)
+    groupe = models.ForeignKey(Groupe, on_delete=models.CASCADE, null=True, blank=True)
+
     class Meta:
-        unique_together = ('enseignant', 'groupe', 'matiere', 'type_enseignement')
+        unique_together = ('enseignant', 'matiere', 'type_enseignement', 'filiere', 'groupe')
+
+    def save(self, *args, **kwargs):
+        if self.type_enseignement == "CM":
+            self.groupe = None
+        else:
+            self.filiere = None
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.enseignant.nom} - {self.matiere.nom} ({self.type_enseignement}) - {self.groupe.nom}"
+        return f"{self.enseignant.nom} - {self.matiere.nom} ({self.type_enseignement})"
     
 class Salle(models.Model):
     id_sl = models.AutoField(primary_key=True)
