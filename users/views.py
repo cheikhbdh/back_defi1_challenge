@@ -161,18 +161,27 @@ class AffectationEnseignantViewSet(viewsets.ModelViewSet):
 
 
 
-def generer_emploi_du_temps(request):
+from ortools.sat.python import cp_model
+from django.http import JsonResponse
+from django.utils.timezone import now
+from .models import (
+    Semaine, JourSemaine, Groupe, Enseignant, Matiere, PlageHoraire, 
+    Salle, AffectationEnseignant, ChargeHebdomadaire, EmploiDuTemps, Filiere
+)
+
+def generer_emploi_du_temps_filiere(request, filiere_id):
     model = cp_model.CpModel()
 
     semaine_actuelle = Semaine.objects.latest('date_debut')
     jours_semaine = list(JourSemaine.objects.filter(semaine=semaine_actuelle))
-
-    groupes = list(Groupe.objects.all())
-    enseignants = list(Enseignant.objects.all())
-    matieres = list(Matiere.objects.all())
+    
+    filiere = Filiere.objects.get(id=filiere_id)
+    groupes = list(Groupe.objects.filter(filiere=filiere))
+    matieres = list(Matiere.objects.filter(filiere=filiere))
+    enseignants = list(Enseignant.objects.filter(affectationenseignant__matiere__in=matieres).distinct())
     plages = list(PlageHoraire.objects.all())
     salles = list(Salle.objects.all())
-    affectations = list(AffectationEnseignant.objects.all())
+    affectations = list(AffectationEnseignant.objects.filter(matiere__in=matieres))
 
     x = {}
     for g in groupes:
@@ -182,7 +191,8 @@ def generer_emploi_du_temps(request):
                     for j in jours_semaine:
                         x[g.id, e.id_Es, m.id, p.id_plh, j.id_jrs] = model.NewBoolVar(f"x_{g.id}_{e.id_Es}_{m.id}_{p.id_plh}_{j.id_jrs}")
 
-    for charge in ChargeHebdomadaire.objects.all():
+
+    for charge in ChargeHebdomadaire.objects.filter(matiere__in=matieres):
         total_heures = charge.cm_heures + charge.td_heures + charge.tp_heures
         model.Add(
             sum(x[charge.groupe.id, e.id_Es, charge.matiere.id, p.id_plh, j.id_jrs] 
@@ -190,6 +200,7 @@ def generer_emploi_du_temps(request):
                 if AffectationEnseignant.objects.filter(enseignant=e, matiere=charge.matiere).exists()
             ) == total_heures
         )
+
 
     for g in groupes:
         for p in plages:
@@ -200,6 +211,7 @@ def generer_emploi_du_temps(request):
                     ) <= 1
                 )
 
+
     for e in enseignants:
         for p in plages:
             for j in jours_semaine:
@@ -209,11 +221,22 @@ def generer_emploi_du_temps(request):
                     ) <= 1
                 )
 
+    for s in salles:
+        for p in plages:
+            for j in jours_semaine:
+                model.Add(
+                    sum(x[g.id, e.id_Es, m.id, p.id_plh, j.id_jrs] 
+                        for g in groupes for e in enseignants for m in matieres
+                        if AffectationEnseignant.objects.filter(enseignant=e, matiere=m).exists()
+                    ) <= 1 
+                )
+
     model.Maximize(
         sum(x[g.id, e.id_Es, m.id, p.id_plh, j.id_jrs] 
             for g in groupes for e in enseignants for m in matieres for p in plages for j in jours_semaine
         )
     )
+
 
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
@@ -226,12 +249,17 @@ def generer_emploi_du_temps(request):
                     for p in plages:
                         for j in jours_semaine:
                             if solver.Value(x[g.id, e.id_Es, m.id, p.id_plh, j.id_jrs]) == 1:
+                                salle_disponible = next(
+                                    (s for s in salles if not EmploiDuTemps.objects.filter(plage_horaire=p, jour=j, salle=s).exists()), 
+                                    None
+                                )
+
                                 emploi = EmploiDuTemps(
                                     groupe=g,
                                     enseignant=e,
                                     matiere=m,
                                     plage_horaire=p,
-                                    salle=salles[0] if salles else None,
+                                    salle=salle_disponible,
                                     jour=j,
                                     heure_debut_cours=p.heure_debut,
                                     heure_fin_cours=p.heure_fin
@@ -242,38 +270,98 @@ def generer_emploi_du_temps(request):
                                     "enseignant": e.nom,
                                     "matiere": m.nom,
                                     "plage_horaire": f"{p.heure_debut} - {p.heure_fin}",
-                                    "date_jour": j.date_jour.strftime('%Y-%m-%d')
+                                    "date_jour": j.date_jour.strftime('%Y-%m-%d'),
+                                    "salle": salle_disponible.nom if salle_disponible else "Aucune salle disponible"
                                 })
         return JsonResponse({"status": "success", "message": "Emploi du temps généré", "data": emplois})
     else:
         return JsonResponse({"status": "error", "message": "Aucune solution trouvée"})
 
-def telecharger_emploi_excel(request, groupe_id):
-    emplois = EmploiDuTemps.objects.filter(groupe__id=groupe_id)
-    data = [{
-        "Matiere": e.matiere.nom,
-        "Enseignant": e.enseignant.nom,
-        "Jour": e.jour.date_jour.strftime('%Y-%m-%d'),
-        "Heure": f"{e.heure_debut_cours} - {e.heure_fin_cours}",
-        "Salle": e.salle.nom if e.salle else ""
-    } for e in emplois]
 
-    df = pd.DataFrame(data)
-    response = HttpResponse(content_type='application/vnd.ms-excel')
+import pandas as pd
+from django.http import HttpResponse
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.pdfgen import canvas
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from collections import defaultdict
+
+def telecharger_emploi_excel(request, groupe_id):
+    emplois = EmploiDuTemps.objects.filter(groupe__id=groupe_id).order_by('jour__date_jour', 'heure_debut_cours')
+
+    data = defaultdict(list)
+    for e in emplois:
+        data[e.jour.date_jour.strftime('%A %d/%m/%Y')].append([
+            f"{e.heure_debut_cours} - {e.heure_fin_cours}",
+            e.matiere.nom,
+            e.enseignant.nom,
+            e.salle.nom if e.salle else ""
+        ])
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Emploi du Temps"
+
+ 
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    border = Border(left=Side(style='thin'), right=Side(style='thin'),
+                    top=Side(style='thin'), bottom=Side(style='thin'))
+
+    ws.append(["Jour", "Horaire", "Matière", "Enseignant", "Salle"])
+    for col in ws[1]:
+        col.fill = header_fill
+        col.font = header_font
+        col.border = border
+        col.alignment = Alignment(horizontal="center")
+
+ 
+    for jour, cours in data.items():
+        for i, row in enumerate(cours):
+            ws.append([jour if i == 0 else "", *row])  
+
+  
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename="emploi_du_temps.xlsx"'
-    df.to_excel(response, index=False)
+    wb.save(response)
     return response
 
 def telecharger_emploi_pdf(request, groupe_id):
-    emplois = EmploiDuTemps.objects.filter(groupe__id=groupe_id)
+    emplois = EmploiDuTemps.objects.filter(groupe__id=groupe_id).order_by('jour__date_jour', 'heure_debut_cours')
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+    elements = []
+
+    data = [["Jour", "Horaire", "Matière", "Enseignant", "Salle"]]
+    for e in emplois:
+        data.append([
+            e.jour.date_jour.strftime('%A %d/%m/%Y'),
+            f"{e.heure_debut_cours} - {e.heure_fin_cours}",
+            e.matiere.nom,
+            e.enseignant.nom,
+            e.salle.nom if e.salle else ""
+        ])
+
+
+    table = Table(data, colWidths=[120, 120, 180, 180, 100])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+
+    elements.append(table)
+    doc.build(elements)
+
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = 'attachment; filename="emploi_du_temps.pdf"'
-    p = canvas.Canvas(response, pagesize=letter)
-    y = 750
-    for e in emplois:
-        text = f"{e.jour.date_jour.strftime('%Y-%m-%d')} - {e.heure_debut_cours} à {e.heure_fin_cours}: {e.matiere.nom} ({e.enseignant.nom})"
-        p.drawString(100, y, text)
-        y -= 20
-    p.showPage()
-    p.save()
+    response.write(buffer.getvalue())
+    buffer.close()
     return response

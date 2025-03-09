@@ -166,12 +166,10 @@ class Groupe(models.Model):
         return f"Groupe {self.nom} - {self.semestre} ({self.filiere.nom})"
 
 
-
-
 class ChargeHebdomadaire(models.Model):
     semaine = models.ForeignKey('Semaine', on_delete=models.CASCADE)
     matiere = models.ForeignKey(Matiere, on_delete=models.CASCADE)
-    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, null=True, blank=True)  # Pour CM
+    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, null=True, blank=True)  # Pour CM et TD/TP
     groupe = models.ForeignKey(Groupe, on_delete=models.CASCADE, null=True, blank=True)  # Pour TD/TP
 
     cm_heures = models.IntegerField(default=0)  # Nombre d'heures de CM (lié à la filière)
@@ -184,10 +182,18 @@ class ChargeHebdomadaire(models.Model):
         unique_together = ('semaine', 'matiere', 'filiere', 'groupe')
 
     def save(self, *args, **kwargs):
+        if not self.filiere:
+            self.filiere, _ = Filiere.objects.get_or_create(nom=f"Filiere_{self.matiere.nom}")
+        
         if self.cm_heures > 0:
-            self.groupe = None  # Un CM est lié à une filière, pas à un groupe
+            self.groupe = None  # Un CM est lié uniquement à une filière
         if self.td_heures > 0 or self.tp_heures > 0:
-            self.filiere = None  # Un TD ou TP est lié à un groupe, pas à une filière
+            if not self.groupe:
+                self.groupe, _ = Groupe.objects.get_or_create(
+                    nom=f"Groupe_{self.matiere.nom}",
+                    semestre=f"S{self.matiere.semestre}",
+                    filiere=self.filiere
+                )
         
         super().save(*args, **kwargs)
 
@@ -216,14 +222,24 @@ class AffectationEnseignant(models.Model):
         unique_together = ('enseignant', 'matiere', 'type_enseignement', 'filiere', 'groupe')
 
     def save(self, *args, **kwargs):
+        if not self.filiere:
+            self.filiere, _ = Filiere.objects.get_or_create(nom=f"Filiere_{self.matiere.nom}")
+        
         if self.type_enseignement == "CM":
             self.groupe = None
         else:
-            self.filiere = None
+            if not self.groupe:
+                self.groupe, _ = Groupe.objects.get_or_create(
+                    nom=f"Groupe_{self.matiere.nom}",
+                    semestre=f"S{self.matiere.semestre}",
+                    filiere=self.filiere
+                )
+        
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.enseignant.nom} - {self.matiere.nom} ({self.type_enseignement})"
+
     
 class Salle(models.Model):
     id_sl = models.AutoField(primary_key=True)
