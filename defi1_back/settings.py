@@ -96,11 +96,11 @@ REST_FRAMEWORK = {
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'challenge_defi1', 
+        'NAME': 'railway', 
         'USER': 'root', 
-        'PASSWORD': '1234',  
-        'HOST': 'localhost',  
-        'PORT': '3307',  
+        'PASSWORD': 'GKAlEsarKcGrugKtqbtyLFpIItwmqJBz',   
+        'HOST': 'shinkansen.proxy.rlwy.net',  
+        'PORT': '11069',  
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
         },
