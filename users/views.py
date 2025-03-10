@@ -6,6 +6,7 @@ from rest_framework.permissions import BasePermission
 from .models import CustomUser
 from .serializers import UserSerializer
 import jwt
+from rest_framework.generics import RetrieveAPIView
 import datetime
 import random
 from django.core.mail import send_mail
@@ -84,33 +85,20 @@ class LoginView(APIView):
         }
         token = jwt.encode(payload, 'secret', algorithm='HS256')
 
-        response = Response({'jwt': token,'role':user.role})
+        response = Response({'jwt': token,'role':user.role,'id_u':user.id_u})
         response.set_cookie(key='jwt', value=token, httponly=True, secure=False, samesite='Lax')
         return response
 
 
 class UserView(APIView):
-    def get(self, request):
-        token = request.COOKIES.get('jwt')
-
-        if not token:
-            return Response({'error': 'Unauthenticated!'}, status=401)
-
-        try:
-            payload = jwt.decode(token, 'secret', algorithms=['HS256'])
-        except jwt.ExpiredSignatureError:
-            return Response({'error': 'Token has expired!'}, status=401)
-        except jwt.InvalidTokenError:
-            return Response({'error': 'Invalid token!'}, status=401)
-
-        user = CustomUser.objects.filter(id_u=payload['id']).first()
+    def get(self, request, id_u):
+        user = CustomUser.objects.filter(id_u=id_u).first()
 
         if not user:
             return Response({'error': 'User not found!'}, status=404)
 
         serializer = UserSerializer(user)
         return Response(serializer.data)
-
 
 class LogoutView(APIView):
     def post(self, request):
@@ -133,12 +121,20 @@ class JourSemaineViewSet(viewsets.ModelViewSet):
     queryset = JourSemaine.objects.all()
     serializer_class = JourSemaineSerializer
 
-# Enseignant ViewSet
 class EnseignantViewSet(viewsets.ModelViewSet):
     queryset = Enseignant.objects.all()
+    # lookup_field = 'identifiant'
     serializer_class = EnseignantSerializer
+    # def update(self, request, *args, **kwargs):
+    #     """Gestion des mises à jour avec PUT."""
+    #     return super().update(request, *args, **kwargs)
 
+class EnseignantByIdentifiantView(RetrieveAPIView):
+    serializer_class = EnseignantSerializer
+    lookup_field = 'identifiant'
 
+    def get_queryset(self):
+        return Enseignant.objects.all()
 class MatiereViewSet(viewsets.ModelViewSet):
     queryset = Matiere.objects.all()
     serializer_class = MatiereSerializer
@@ -365,3 +361,4 @@ def telecharger_emploi_pdf(request, groupe_id):
     response.write(buffer.getvalue())
     buffer.close()
     return response
+

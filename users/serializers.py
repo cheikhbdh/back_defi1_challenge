@@ -3,7 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from .models import CustomUser
 from .models import PlageHoraire, Semaine, JourSemaine, Enseignant
-from .models import Matiere, Groupe,  ChargeHebdomadaire, AffectationEnseignant
+from .models import Matiere, Groupe,  ChargeHebdomadaire, AffectationEnseignant 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
 
@@ -60,11 +60,10 @@ class MatiereSerializer(serializers.ModelSerializer):
 
 
 class GroupeSerializer(serializers.ModelSerializer):
-    matieres = MatiereSerializer(many=True)
 
     class Meta:
         model = Groupe
-        fields = ['id', 'nom', 'semestre', 'matieres']
+        fields = ['id', 'nom', 'semestre', 'filiere']
 
 
 
@@ -75,8 +74,15 @@ class ChargeHebdomadaireSerializer(serializers.ModelSerializer):
         model = ChargeHebdomadaire
         fields = ['id', 'semaine', 'matiere', 'groupe', 'cm_heures', 'td_heures', 'tp_heures', 'reconduite']
 
-
+class MatiereSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Matiere
+        fields = ['id', 'code', 'nom', 'credits', 'coefficient','semestre']
 class AffectationEnseignantSerializer(serializers.ModelSerializer):
+    enseignant = EnseignantSerializer()
+    matiere = MatiereSerializer()  
+    groupe = GroupeSerializer(required=False, allow_null=True) 
+    
     class Meta:
         model = AffectationEnseignant
         fields = ['id', 'enseignant', 'groupe', 'matiere', 'type_enseignement']

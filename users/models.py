@@ -172,9 +172,9 @@ class ChargeHebdomadaire(models.Model):
     filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, null=True, blank=True)  # Pour CM et TD/TP
     groupe = models.ForeignKey(Groupe, on_delete=models.CASCADE, null=True, blank=True)  # Pour TD/TP
 
-    cm_heures = models.IntegerField(default=0)  # Nombre d'heures de CM (lié à la filière)
-    td_heures = models.IntegerField(default=0)  # Nombre d'heures de TD (lié au groupe)
-    tp_heures = models.IntegerField(default=0)  # Nombre d'heures de TP (lié au groupe)
+    cm_heures = models.IntegerField(default=0)  
+    td_heures = models.IntegerField(default=0)  
+    tp_heures = models.IntegerField(default=0)  
     
     reconduite = models.BooleanField(default=False)  # Si la configuration est reprise
 
@@ -186,7 +186,7 @@ class ChargeHebdomadaire(models.Model):
             self.filiere, _ = Filiere.objects.get_or_create(nom=f"Filiere_{self.matiere.nom}")
         
         if self.cm_heures > 0:
-            self.groupe = None  # Un CM est lié uniquement à une filière
+            self.groupe = None 
         if self.td_heures > 0 or self.tp_heures > 0:
             if not self.groupe:
                 self.groupe, _ = Groupe.objects.get_or_create(
@@ -205,7 +205,8 @@ class ChargeHebdomadaire(models.Model):
 
 class AffectationEnseignant(models.Model):
     enseignant = models.ForeignKey('Enseignant', on_delete=models.CASCADE)
-    matiere = models.ForeignKey(Matiere, on_delete=models.CASCADE)
+    matiere = models.ForeignKey(Matiere, on_delete=models.CASCADE, related_name="matiere", null=True, blank=True)
+
     
     TYPE_ENSEIGNEMENT = [
         ('CM', 'Cours Magistral'),
@@ -222,19 +223,20 @@ class AffectationEnseignant(models.Model):
         unique_together = ('enseignant', 'matiere', 'type_enseignement', 'filiere', 'groupe')
 
     def save(self, *args, **kwargs):
-        if not self.filiere:
-            self.filiere, _ = Filiere.objects.get_or_create(nom=f"Filiere_{self.matiere.nom}")
-        
-        if self.type_enseignement == "CM":
-            self.groupe = None
-        else:
-            if not self.groupe:
-                self.groupe, _ = Groupe.objects.get_or_create(
-                    nom=f"Groupe_{self.matiere.nom}",
-                    semestre=f"S{self.matiere.semestre}",
-                    filiere=self.filiere
-                )
-        
+        if self.matiere:  # Vérifie si la matière est définie avant d'accéder à ses attributs
+            if not self.filiere:
+                self.filiere, _ = Filiere.objects.get_or_create(nom=f"Filiere_{self.matiere.nom}")
+
+            if self.type_enseignement == "CM":
+                self.groupe = None
+            else:
+                if not self.groupe:
+                    self.groupe, _ = Groupe.objects.get_or_create(
+                        nom=f"Groupe_{self.matiere.nom}",
+                        semestre=f"S{self.matiere.semestre}",
+                        filiere=self.filiere
+                    )
+
         super().save(*args, **kwargs)
 
     def __str__(self):
