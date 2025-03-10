@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["python311", "pip"]
+
+[phases.build]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "gunicorn defi1_back.wsgi:application --bind 0.0.0.0:$PORT"
